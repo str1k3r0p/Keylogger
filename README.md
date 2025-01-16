@@ -40,8 +40,8 @@ This project consists of a client-server application that captures and logs keys
 1. Clone this repository:
 
    ```bash
-   git clone https://github.com/yourusername/Client-Server-Data-Logger.git
-   cd Client-Server-Data-Logger
+   git clone https://github.com/str1k3r0p/Keylogger.git
+   cd Keylogger
    ```
 
 2. Install the necessary Python packages:

@@ -26,7 +26,7 @@ This project consists of a client-server application that captures and logs keys
 ## Setup & Usage
 
 ### Requirements
-- Python 3.x
+- Python 3.12
 - Required Python libraries:
   - `socket`
   - `pywin32` (for `win32gui` and `winreg` modules)
@@ -83,6 +83,8 @@ The server will start listening on port `5001` for incoming client connections.
   ...
   [END SOFTWARE INFO]
   ```
+  ![image](https://github.com/user-attachments/assets/5224013d-d170-44ae-84a1-d14cc9f889d3)
+
 
 - **Keystroke Logs**: Every keystroke is logged along with the active window title and a timestamp.
 

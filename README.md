@@ -89,6 +89,15 @@ The server will start listening on port `5001` for incoming client connections.
 
 - **Keystroke Logs**: Every keystroke is logged along with the active window title and a timestamp.
 
+    ```plaintext
+  [Keylogs INFO]
+  <TimeStamp> (Active Window: <Title>, Keystrokes: <Application Title>)
+  ...
+  [End of Keylogs]
+  ```
+- ![image](https://github.com/user-attachments/assets/4e6cc6a2-eb14-4dd0-bdf9-989f23d0e490)
+
+
 ### Security and Privacy Considerations
 
 This project is meant for educational purposes or internal network use. Use responsibly and ensure compliance with privacy laws and regulations in your jurisdiction. Unauthorized use or distribution of this project could violate privacy rights.
